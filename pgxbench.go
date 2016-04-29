@@ -2,6 +2,7 @@ package pgxbench
 
 import (
 	"github.com/jackc/pgx"
+	"os"
 )
 
 func extractConfig() (config pgx.ConnPoolConfig, err error) {

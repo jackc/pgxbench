@@ -1,9 +1,9 @@
-package main
+package pgxbench
 
 import (
+	"flag"
 	"fmt"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +11,9 @@ import (
 )
 
 var (
-	pgxPool *pgx.ConnPool
+	pgxPool     *pgx.ConnPool
+	randUserIDs []int64
+	manyCount   int64
 )
 
 func TestMain(m *testing.M) {
@@ -35,425 +37,195 @@ func setup() error {
 	if err != nil {
 		return err
 	}
+
+	rows, err := pgxPool.Query(`select id from pgxbench_user order by random()`)
+	if err != nil {
+		return err
+	}
+
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		randUserIDs = append(randUserIDs, id)
+	}
+
+	if rows.Err() != nil {
+		return err
+	}
+
+	manyCount = 25
+
+	return nil
 }
 
-const selectUserSQL = `
-select id, first_name, last_name, sex, birth_date, weight, height, update_time
-from person
-where id=$1`
-
-var selectPersonSQLQuestionMark = `
-select id, first_name, last_name, sex, birth_date, weight, height, update_time
-from person
-where id=?`
-
-var selectMultiplePeopleSQL = `
-select id, first_name, last_name, sex, birth_date, weight, height, update_time
-from person
-where id between $1 and $1 + 24`
-var selectMultiplePeopleSQLQuestionMark = `
-select id, first_name, last_name, sex, birth_date, weight, height, update_time
-from person
-where id between ? and ? + 24`
-
-type person struct {
-	Id         int32
-	FirstName  string
-	LastName   string
-	Sex        string
-	BirthDate  time.Time
-	Weight     int32
-	Height     int32
-	UpdateTime time.Time
+type user struct {
+	id               int64
+	active           bool
+	admin            bool
+	name             string
+	email            string
+	firstName        string
+	lastName         string
+	birthDate        time.Time
+	passwordDigest   []byte
+	loginCount       int32
+	failedLoginCount int32
+	passwordStrength int32
+	creationTime     time.Time
+	lastLoginTime    time.Time
 }
 
-func BenchmarkPgxNativeSelectSingleValue(b *testing.B) {
-	setup(b)
+func BenchmarkPgxSelectOneRow(b *testing.B) {
+	conn, err := pgxPool.Acquire()
+	if err != nil {
+		b.Fatalf("unable to acquire connection: %v", err)
+	}
+	defer pgxPool.Release(conn)
+
+	psName := "selectOneUser"
+	_, err = pgxPool.Prepare(psName, `select id, active, admin, name, email, first_name, last_name, birth_date, password_digest, login_count, failed_login_count, password_strength, creation_time, last_login_time
+from pgxbench_user
+where id=$1`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
 
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		id := randPersonIDs[i%len(randPersonIDs)]
-		var firstName string
-		err := pgxPool.QueryRow("selectPersonName", id).Scan(&firstName)
+		id := randUserIDs[i%len(randUserIDs)]
+		var u user
+		err := pgxPool.QueryRow(psName, id).Scan(&u.id, &u.active, &u.admin, &u.name, &u.email, &u.firstName, &u.lastName, &u.birthDate, &u.passwordDigest, &u.loginCount, &u.failedLoginCount, &u.passwordStrength, &u.creationTime, &u.lastLoginTime)
 		if err != nil {
 			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
 		}
-		if len(firstName) == 0 {
-			b.Fatal("FirstName was empty")
+
+		// Simple check to ensure data was actually read
+		if u.id == 0 {
+			b.Fatal("id was 0")
 		}
 	}
 }
 
-func BenchmarkPgxStdlibSelectSingleValue(b *testing.B) {
-	setup(b)
-	stmt, err := pgxStdlib.Prepare(selectPersonNameSQL)
+func BenchmarkPgxSelectOneString(b *testing.B) {
+	conn, err := pgxPool.Acquire()
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to acquire connection: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Release(conn)
 
-	benchmarkSelectSingleValue(b, stmt)
-}
-
-func BenchmarkPgSelectSingleValue(b *testing.B) {
-	setup(b)
-
-	stmt, err := pg.Prepare(selectPersonNameSQL)
+	psName := "selectOneString"
+	_, err = pgxPool.Prepare(psName, `select name from pgxbench_user where id=$1`)
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to prepare query: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Deallocate(psName)
 
 	b.ResetTimer()
+
 	for i := 0; i < b.N; i++ {
-		var firstName string
-		id := randPersonIDs[i%len(randPersonIDs)]
-		_, err := stmt.QueryOne(gopg.LoadInto(&firstName), id)
+		id := randUserIDs[i%len(randUserIDs)]
+		var name string
+		err := pgxPool.QueryRow(psName, id).Scan(&name)
 		if err != nil {
-			b.Fatalf("stmt.QueryOne failed: %v", err)
+			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
 		}
-		if len(firstName) == 0 {
-			b.Fatal("FirstName was empty")
+
+		// Simple check to ensure data was actually read
+		if name == "" {
+			b.Fatal("name was blank")
 		}
 	}
 }
 
-func BenchmarkPqSelectSingleValue(b *testing.B) {
-	setup(b)
-	stmt, err := pq.Prepare(selectPersonNameSQL)
+func BenchmarkPgxSelectOneInt32(b *testing.B) {
+	conn, err := pgxPool.Acquire()
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to acquire connection: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Release(conn)
 
-	benchmarkSelectSingleValue(b, stmt)
-}
-
-func benchmarkSelectSingleValue(b *testing.B, stmt *sql.Stmt) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		id := randPersonIDs[i%len(randPersonIDs)]
-		row := stmt.QueryRow(id)
-		var firstName string
-		err := row.Scan(&firstName)
-		if err != nil {
-			b.Fatalf("row.Scan failed: %v", err)
-		}
-		if len(firstName) == 0 {
-			b.Fatal("FirstName was empty")
-		}
-	}
-}
-
-func BenchmarkRawSelectSingleValue(b *testing.B) {
-	setup(b)
-
-	b.ResetTimer()
-
-	txBufs := make([][]byte, len(randPersonIDs))
-	for i, personID := range randPersonIDs {
-		var err error
-		txBufs[i], err = rawConn.BuildPreparedQueryBuf(rawSelectPersonNameStmt, personID)
-		if err != nil {
-			b.Fatalf("rawConn.BuildQueryBuf failed: %v", err)
-		}
-	}
-
-	for i := 0; i < b.N; i++ {
-		txBuf := txBufs[i%len(txBufs)]
-		_, err := rawConn.Conn().Write(txBuf)
-		if err != nil {
-			b.Fatalf("rawConn.Conn.Write failed: %v", err)
-		}
-
-		rxRawUntilReady(b)
-	}
-}
-
-func checkPersonWasFilled(b *testing.B, p person) {
-	if p.Id == 0 {
-		b.Fatal("id was 0")
-	}
-	if len(p.FirstName) == 0 {
-		b.Fatal("FirstName was empty")
-	}
-	if len(p.LastName) == 0 {
-		b.Fatal("LastName was empty")
-	}
-	if len(p.Sex) == 0 {
-		b.Fatal("Sex was empty")
-	}
-	var zeroTime time.Time
-	if p.BirthDate == zeroTime {
-		b.Fatal("BirthDate was zero time")
-	}
-	if p.Weight == 0 {
-		b.Fatal("Weight was 0")
-	}
-	if p.Height == 0 {
-		b.Fatal("Height was 0")
-	}
-	if p.UpdateTime == zeroTime {
-		b.Fatal("UpdateTime was zero time")
-	}
-}
-
-func BenchmarkPgxNativeSelectSingleRow(b *testing.B) {
-	setup(b)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var p person
-		id := randPersonIDs[i%len(randPersonIDs)]
-
-		rows, _ := pgxPool.Query("selectPerson", id)
-		for rows.Next() {
-			rows.Scan(&p.Id, &p.FirstName, &p.LastName, &p.Sex, &p.BirthDate, &p.Weight, &p.Height, &p.UpdateTime)
-		}
-		if rows.Err() != nil {
-			b.Fatalf("pgxPool.Query failed: %v", rows.Err())
-		}
-
-		checkPersonWasFilled(b, p)
-	}
-}
-
-func BenchmarkPgxStdlibSelectSingleRow(b *testing.B) {
-	setup(b)
-	stmt, err := pgxStdlib.Prepare(selectPersonSQL)
+	psName := "selectOneInt32"
+	_, err = pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id=$1`)
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to prepare query: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Deallocate(psName)
 
-	benchmarkSelectSingleRow(b, stmt)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		id := randUserIDs[i%len(randUserIDs)]
+		var passwordStrength int32
+		err := pgxPool.QueryRow(psName, id).Scan(&passwordStrength)
+		if err != nil {
+			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
+		}
+	}
 }
 
-func BenchmarkPgSelectSingleRow(b *testing.B) {
-	setup(b)
-
-	stmt, err := pg.Prepare(selectPersonSQL)
+func BenchmarkPgxSelectManyInt32(b *testing.B) {
+	conn, err := pgxPool.Acquire()
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to acquire connection: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Release(conn)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var p person
-		id := randPersonIDs[i%len(randPersonIDs)]
-		_, err := stmt.QueryOne(&p, id)
-		if err != nil {
-			b.Fatalf("stmt.QueryOne failed: %v", err)
-		}
-
-		checkPersonWasFilled(b, p)
-	}
-}
-
-func BenchmarkPqSelectSingleRow(b *testing.B) {
-	setup(b)
-	stmt, err := pq.Prepare(selectPersonSQL)
+	psName := "selectManyInt32"
+	_, err = pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id between $1 and $2`)
 	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
+		b.Fatalf("unable to prepare query: %v", err)
 	}
-	defer stmt.Close()
+	defer pgxPool.Deallocate(psName)
 
-	benchmarkSelectSingleRow(b, stmt)
-}
-
-func benchmarkSelectSingleRow(b *testing.B, stmt *sql.Stmt) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		id := randPersonIDs[i%len(randPersonIDs)]
-		row := stmt.QueryRow(id)
-		var p person
-		err := row.Scan(&p.Id, &p.FirstName, &p.LastName, &p.Sex, &p.BirthDate, &p.Weight, &p.Height, &p.UpdateTime)
-		if err != nil {
-			b.Fatalf("row.Scan failed: %v", err)
-		}
-
-		checkPersonWasFilled(b, p)
-	}
-}
-
-func BenchmarkRawSelectSingleRow(b *testing.B) {
-	setup(b)
 	b.ResetTimer()
 
-	txBufs := make([][]byte, len(randPersonIDs))
-	for i, personID := range randPersonIDs {
-		var err error
-		txBufs[i], err = rawConn.BuildPreparedQueryBuf(rawSelectPersonStmt, personID)
-		if err != nil {
-			b.Fatalf("rawConn.BuildPreparedQueryBuf failed: %v", err)
-		}
-	}
-
 	for i := 0; i < b.N; i++ {
-		txBuf := txBufs[i%len(txBufs)]
-		_, err := rawConn.Conn().Write(txBuf)
+		id := randUserIDs[i%len(randUserIDs)]
+		var passwordStrength int32
+		rows, err := pgxPool.Query(psName, id, id+manyCount)
 		if err != nil {
-			b.Fatalf("rawConn.Conn.Write failed: %v", err)
-		}
-
-		rxRawUntilReady(b)
-	}
-}
-
-func BenchmarkPgxNativeSelectMultipleRows(b *testing.B) {
-	setup(b)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var people []person
-		id := randPersonIDs[i%len(randPersonIDs)]
-
-		rows, _ := pgxPool.Query("selectMultiplePeople", id)
-		for rows.Next() {
-			var p person
-			rows.Scan(&p.Id, &p.FirstName, &p.LastName, &p.Sex, &p.BirthDate, &p.Weight, &p.Height, &p.UpdateTime)
-			people = append(people, p)
-		}
-		if rows.Err() != nil {
-			b.Fatalf("pgxPool.Query failed: %v", rows.Err())
-		}
-
-		for _, p := range people {
-			checkPersonWasFilled(b, p)
-		}
-	}
-}
-
-func BenchmarkPgxStdlibSelectMultipleRows(b *testing.B) {
-	setup(b)
-
-	stmt, err := pgxStdlib.Prepare(selectMultiplePeopleSQL)
-	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
-	}
-	defer stmt.Close()
-
-	benchmarkSelectMultipleRows(b, stmt)
-}
-
-func BenchmarkPgSelectMultipleRows(b *testing.B) {
-	setup(b)
-
-	stmt, err := pg.Prepare(selectMultiplePeopleSQL)
-	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
-	}
-	defer stmt.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var people People
-		id := randPersonIDs[i%len(randPersonIDs)]
-		_, err := stmt.Query(&people, id)
-		if err != nil {
-			b.Fatalf("stmt.Query failed: %v", err)
-		}
-
-		for i, _ := range people.C {
-			checkPersonWasFilled(b, people.C[i])
-		}
-	}
-}
-
-func BenchmarkPgSelectMultipleRowsAndDiscard(b *testing.B) {
-	setup(b)
-
-	stmt, err := pg.Prepare(selectMultiplePeopleSQL)
-	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
-	}
-	defer stmt.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		id := randPersonIDs[i%len(randPersonIDs)]
-		_, err := stmt.Query(gopg.Discard, id)
-		if err != nil {
-			b.Fatalf("stmt.Query failed: %v", err)
-		}
-	}
-}
-
-func BenchmarkPqSelectMultipleRows(b *testing.B) {
-	setup(b)
-
-	stmt, err := pq.Prepare(selectMultiplePeopleSQL)
-	if err != nil {
-		b.Fatalf("Prepare failed: %v", err)
-	}
-	defer stmt.Close()
-
-	benchmarkSelectMultipleRows(b, stmt)
-}
-
-func benchmarkSelectMultipleRows(b *testing.B, stmt *sql.Stmt) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var people []person
-		id := randPersonIDs[i%len(randPersonIDs)]
-		rows, err := stmt.Query(id)
-		if err != nil {
-			b.Fatalf("db.Query failed: %v", err)
+			b.Fatalf("pgxPool.Query failed: %v", err)
 		}
 
 		for rows.Next() {
-			var p person
-			err := rows.Scan(&p.Id, &p.FirstName, &p.LastName, &p.Sex, &p.BirthDate, &p.Weight, &p.Height, &p.UpdateTime)
-			if err != nil {
-				b.Fatalf("rows.Scan failed: %v", err)
-			}
-			people = append(people, p)
+			rows.Scan(&passwordStrength)
 		}
 
 		if rows.Err() != nil {
-			b.Fatalf("rows.Err() returned an error: %v", err)
-		}
-
-		for _, p := range people {
-			checkPersonWasFilled(b, p)
+			b.Fatalf("rows.Err(): %v", rows.Err())
 		}
 	}
 }
 
-func BenchmarkRawSelectMultipleRows(b *testing.B) {
-	setup(b)
+func BenchmarkPgxSelectOneByteSlice(b *testing.B) {
+	conn, err := pgxPool.Acquire()
+	if err != nil {
+		b.Fatalf("unable to acquire connection: %v", err)
+	}
+	defer pgxPool.Release(conn)
+
+	psName := "selectOneByteSlice"
+	_, err = pgxPool.Prepare(psName, `select password_digest from pgxbench_user where id=$1`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
 
 	b.ResetTimer()
 
-	txBufs := make([][]byte, len(randPersonIDs))
-	for i, personID := range randPersonIDs {
-		var err error
-		txBufs[i], err = rawConn.BuildPreparedQueryBuf(rawSelectMultiplePeopleStmt, personID)
-		if err != nil {
-			b.Fatalf("rawConn.BuildPreparedQueryBuf failed: %v", err)
-		}
-	}
-
 	for i := 0; i < b.N; i++ {
-		txBuf := txBufs[i%len(txBufs)]
-		_, err := rawConn.Conn().Write(txBuf)
+		id := randUserIDs[i%len(randUserIDs)]
+		var passwordDigest []byte
+		err := pgxPool.QueryRow(psName, id).Scan(&passwordDigest)
 		if err != nil {
-			b.Fatalf("rawConn.Conn.Write failed: %v", err)
+			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
 		}
 
-		rxRawUntilReady(b)
-	}
-}
-
-func rxRawUntilReady(b *testing.B) {
-	for {
-		n, err := rawConn.Conn().Read(rxBuf)
-		if err != nil {
-			b.Fatalf("rawConn.Conn.Read failed: %v", err)
-		}
-		if rxBuf[n-6] == 'Z' && rxBuf[n-2] == 5 && rxBuf[n-1] == 'I' {
-			return
+		// Simple check to ensure data was actually read
+		if len(passwordDigest) == 0 {
+			b.Fatal("passwordDigest was blank")
 		}
 	}
 }
