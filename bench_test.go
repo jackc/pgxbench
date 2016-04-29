@@ -93,9 +93,9 @@ where id=$1`)
 
 	b.ResetTimer()
 
+	var u user
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		var u user
 		err := pgxPool.QueryRow(psName, id).Scan(&u.id, &u.active, &u.admin, &u.name, &u.email, &u.firstName, &u.lastName, &u.birthDate, &u.passwordDigest, &u.loginCount, &u.failedLoginCount, &u.passwordStrength, &u.creationTime, &u.lastLoginTime)
 		if err != nil {
 			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
@@ -124,9 +124,9 @@ func BenchmarkPgxSelectOneString(b *testing.B) {
 
 	b.ResetTimer()
 
+	var name string
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		var name string
 		err := pgxPool.QueryRow(psName, id).Scan(&name)
 		if err != nil {
 			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
@@ -155,9 +155,9 @@ func BenchmarkPgxSelectOneInt32(b *testing.B) {
 
 	b.ResetTimer()
 
+	var passwordStrength int32
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		var passwordStrength int32
 		err := pgxPool.QueryRow(psName, id).Scan(&passwordStrength)
 		if err != nil {
 			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
@@ -181,9 +181,9 @@ func BenchmarkPgxSelectManyInt32(b *testing.B) {
 
 	b.ResetTimer()
 
+	var passwordStrength int32
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		var passwordStrength int32
 		rows, err := pgxPool.Query(psName, id, id+manyCount)
 		if err != nil {
 			b.Fatalf("pgxPool.Query failed: %v", err)
@@ -215,9 +215,9 @@ func BenchmarkPgxSelectOneByteSlice(b *testing.B) {
 
 	b.ResetTimer()
 
+	var passwordDigest []byte
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		var passwordDigest []byte
 		err := pgxPool.QueryRow(psName, id).Scan(&passwordDigest)
 		if err != nil {
 			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
