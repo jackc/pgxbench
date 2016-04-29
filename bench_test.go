@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -9,24 +10,38 @@ import (
 	"github.com/jackc/pgx"
 )
 
+var (
+	pgxPool *pgx.ConnPool
+)
 
 func TestMain(m *testing.M) {
 	flag.Parse()
+	err := setup()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to setup test: %v\n", err)
+		os.Exit(1)
+	}
+
 	os.Exit(m.Run())
 }
 
-var (
-	pgxPool       *pgx.ConnPool
-	randPersonIDs []int32
-)
+func setup() error {
+	config, err := extractConfig()
+	if err != nil {
+		return err
+	}
 
-var selectPersonNameSQL = `select first_name from person where id=$1`
-var selectPersonNameSQLQuestionMark = `select first_name from person where id=?`
+	pgxPool, err = pgx.NewConnPool(config)
+	if err != nil {
+		return err
+	}
+}
 
-var selectPersonSQL = `
+const selectUserSQL = `
 select id, first_name, last_name, sex, birth_date, weight, height, update_time
 from person
 where id=$1`
+
 var selectPersonSQLQuestionMark = `
 select id, first_name, last_name, sex, birth_date, weight, height, update_time
 from person
@@ -50,56 +65,6 @@ type person struct {
 	Weight     int32
 	Height     int32
 	UpdateTime time.Time
-}
-
-func setup(b *testing.B) {
-		config, err := extractConfig()
-		if err != nil {
-			b.Fatalf("extractConfig failed: %v", err)
-		}
-
-		pgxPool, err = pgx.NewConnPool(config)
-		if err != nil {
-			b.Fatalf("NewConnPool failed: %v", err)
-		}
-
-
-		config.AfterConnect = func(conn *pgx.Conn) error {
-			_, err := conn.Prepare("selectPersonName", selectPersonNameSQL)
-			if err != nil {
-				return err
-			}
-
-			_, err = conn.Prepare("selectPerson", selectPersonSQL)
-			if err != nil {
-				return err
-			}
-
-			_, err = conn.Prepare("selectMultiplePeople", selectMultiplePeopleSQL)
-			if err != nil {
-				return err
-			}
-
-			return nil
-		}
-
-		err = loadTestData(config)
-		if err != nil {
-			b.Fatalf("loadTestData failed: %v", err)
-		}
-
-		// Get random person ids in random order outside of timing
-		rows, _ := pgxPool.Query("select id from person order by random()")
-		for rows.Next() {
-			var id int32
-			rows.Scan(&id)
-			randPersonIDs = append(randPersonIDs, id)
-		}
-
-		if rows.Err() != nil {
-			b.Fatalf("pgxPool.Query failed: %v", err)
-		}
-	})
 }
 
 func BenchmarkPgxNativeSelectSingleValue(b *testing.B) {

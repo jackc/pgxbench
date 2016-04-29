@@ -1,0 +1,58 @@
+-- erb -r ffaker -r date -r securerandom setup.sql.erb
+drop table if exists pgxbench_user;
+
+create table pgxbench_user(
+  id bigserial primary key,
+  active boolean not null,
+  admin boolean not null,
+  name varchar not null,
+  email varchar not null,
+  first_name varchar,
+  last_name varchar,
+  birth_date date,
+  password_digest bytea not null,
+  login_count integer not null,
+  failed_login_count integer not null,
+  password_strength integer not null,
+  creation_time timestamptz not null,
+  last_login_time timestamptz not null
+);
+
+<%
+  def pgx_escape(s)
+    "'#{s.to_s.gsub("'", "''")}'"
+  end
+%>
+
+insert into pgxbench_user(
+  active,
+  admin,
+  name,
+  email,
+  first_name,
+  last_name,
+  birth_date,
+  password_digest,
+  login_count,
+  failed_login_count,
+  password_strength,
+  creation_time,
+  last_login_time
+) values
+<% 1_000.times do |n| %><%= "," unless n==0 %>(
+  <%= rand(20) > 1 %>,
+  <%= rand(200) > 1 %>,
+  <%= pgx_escape FFaker::Internet.user_name %>,
+  <%= pgx_escape FFaker::Internet.email %>,
+  <%= pgx_escape FFaker::Name.first_name %>,
+  <%= pgx_escape FFaker::Name.last_name %>,
+  <%= pgx_escape(Date.today - rand(10_000)) %>,
+  decode('<%= SecureRandom.hex(32) %>', 'hex'),
+  <%= rand(100) %>,
+  <%= [0, -90 + rand(100)].max %>,
+  <%= rand(400) %>,
+  <%= pgx_escape (Time.now - rand(1_000_000_000)).strftime("%Y-%m-%d %H:%M:%S") %>,
+  <%= pgx_escape (Time.now - rand(50_000_000)).strftime("%Y-%m-%d %H:%M:%S") %>
+)<% end %>;
+
+analyze pgxbench_user;

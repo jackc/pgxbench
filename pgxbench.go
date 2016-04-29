@@ -29,28 +29,3 @@ func extractConfig() (config pgx.ConnPoolConfig, err error) {
 
 	return config, nil
 }
-
-func loadTestData(config pgx.ConnPoolConfig) error {
-	conn, err := pgx.Connect(config.ConnConfig)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	_, err = conn.Exec(personCreateSQL)
-	if err != nil {
-		return err
-	}
-
-	_, err = conn.Exec(personInsertSQL)
-	if err != nil {
-		return err
-	}
-
-	_, err = conn.Exec("analyze person")
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
