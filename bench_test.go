@@ -76,14 +76,8 @@ type user struct {
 }
 
 func BenchmarkPgxSelectOneRow(b *testing.B) {
-	conn, err := pgxPool.Acquire()
-	if err != nil {
-		b.Fatalf("unable to acquire connection: %v", err)
-	}
-	defer pgxPool.Release(conn)
-
 	psName := "selectOneUser"
-	_, err = pgxPool.Prepare(psName, `select id, active, admin, name, email, first_name, last_name, birth_date, password_digest, login_count, failed_login_count, password_strength, creation_time, last_login_time
+	_, err := pgxPool.Prepare(psName, `select id, active, admin, name, email, first_name, last_name, birth_date, password_digest, login_count, failed_login_count, password_strength, creation_time, last_login_time
 from pgxbench_user
 where id=$1`)
 	if err != nil {
@@ -91,14 +85,20 @@ where id=$1`)
 	}
 	defer pgxPool.Deallocate(psName)
 
+	conn, err := pgxPool.Acquire()
+	if err != nil {
+		b.Fatalf("unable to acquire connection: %v", err)
+	}
+	defer pgxPool.Release(conn)
+
 	b.ResetTimer()
 
 	var u user
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		err := pgxPool.QueryRow(psName, id).Scan(&u.id, &u.active, &u.admin, &u.name, &u.email, &u.firstName, &u.lastName, &u.birthDate, &u.passwordDigest, &u.loginCount, &u.failedLoginCount, &u.passwordStrength, &u.creationTime, &u.lastLoginTime)
+		err := conn.QueryRow(psName, id).Scan(&u.id, &u.active, &u.admin, &u.name, &u.email, &u.firstName, &u.lastName, &u.birthDate, &u.passwordDigest, &u.loginCount, &u.failedLoginCount, &u.passwordStrength, &u.creationTime, &u.lastLoginTime)
 		if err != nil {
-			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
+			b.Fatalf("conn.QueryRow Scan failed: %v", err)
 		}
 
 		// Simple check to ensure data was actually read
@@ -109,27 +109,27 @@ where id=$1`)
 }
 
 func BenchmarkPgxSelectOneString(b *testing.B) {
+	psName := "selectOneString"
+	_, err := pgxPool.Prepare(psName, `select name from pgxbench_user where id=$1`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
+
 	conn, err := pgxPool.Acquire()
 	if err != nil {
 		b.Fatalf("unable to acquire connection: %v", err)
 	}
 	defer pgxPool.Release(conn)
 
-	psName := "selectOneString"
-	_, err = pgxPool.Prepare(psName, `select name from pgxbench_user where id=$1`)
-	if err != nil {
-		b.Fatalf("unable to prepare query: %v", err)
-	}
-	defer pgxPool.Deallocate(psName)
-
 	b.ResetTimer()
 
 	var name string
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		err := pgxPool.QueryRow(psName, id).Scan(&name)
+		err := conn.QueryRow(psName, id).Scan(&name)
 		if err != nil {
-			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
+			b.Fatalf("conn.QueryRow Scan failed: %v", err)
 		}
 
 		// Simple check to ensure data was actually read
@@ -140,53 +140,53 @@ func BenchmarkPgxSelectOneString(b *testing.B) {
 }
 
 func BenchmarkPgxSelectOneInt32(b *testing.B) {
+	psName := "selectOneInt32"
+	_, err := pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id=$1`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
+
 	conn, err := pgxPool.Acquire()
 	if err != nil {
 		b.Fatalf("unable to acquire connection: %v", err)
 	}
 	defer pgxPool.Release(conn)
 
-	psName := "selectOneInt32"
-	_, err = pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id=$1`)
-	if err != nil {
-		b.Fatalf("unable to prepare query: %v", err)
-	}
-	defer pgxPool.Deallocate(psName)
-
 	b.ResetTimer()
 
 	var passwordStrength int32
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		err := pgxPool.QueryRow(psName, id).Scan(&passwordStrength)
+		err := conn.QueryRow(psName, id).Scan(&passwordStrength)
 		if err != nil {
-			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
+			b.Fatalf("conn.QueryRow Scan failed: %v", err)
 		}
 	}
 }
 
 func BenchmarkPgxSelectManyInt32(b *testing.B) {
+	psName := "selectManyInt32"
+	_, err := pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id between $1 and $2`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
+
 	conn, err := pgxPool.Acquire()
 	if err != nil {
 		b.Fatalf("unable to acquire connection: %v", err)
 	}
 	defer pgxPool.Release(conn)
 
-	psName := "selectManyInt32"
-	_, err = pgxPool.Prepare(psName, `select password_strength from pgxbench_user where id between $1 and $2`)
-	if err != nil {
-		b.Fatalf("unable to prepare query: %v", err)
-	}
-	defer pgxPool.Deallocate(psName)
-
 	b.ResetTimer()
 
 	var passwordStrength int32
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		rows, err := pgxPool.Query(psName, id, id+manyCount)
+		rows, err := conn.Query(psName, id, id+manyCount)
 		if err != nil {
-			b.Fatalf("pgxPool.Query failed: %v", err)
+			b.Fatalf("conn.Query failed: %v", err)
 		}
 
 		for rows.Next() {
@@ -200,27 +200,27 @@ func BenchmarkPgxSelectManyInt32(b *testing.B) {
 }
 
 func BenchmarkPgxSelectOneByteSlice(b *testing.B) {
+	psName := "selectOneByteSlice"
+	_, err := pgxPool.Prepare(psName, `select password_digest from pgxbench_user where id=$1`)
+	if err != nil {
+		b.Fatalf("unable to prepare query: %v", err)
+	}
+	defer pgxPool.Deallocate(psName)
+
 	conn, err := pgxPool.Acquire()
 	if err != nil {
 		b.Fatalf("unable to acquire connection: %v", err)
 	}
 	defer pgxPool.Release(conn)
 
-	psName := "selectOneByteSlice"
-	_, err = pgxPool.Prepare(psName, `select password_digest from pgxbench_user where id=$1`)
-	if err != nil {
-		b.Fatalf("unable to prepare query: %v", err)
-	}
-	defer pgxPool.Deallocate(psName)
-
 	b.ResetTimer()
 
 	var passwordDigest []byte
 	for i := 0; i < b.N; i++ {
 		id := randUserIDs[i%len(randUserIDs)]
-		err := pgxPool.QueryRow(psName, id).Scan(&passwordDigest)
+		err := conn.QueryRow(psName, id).Scan(&passwordDigest)
 		if err != nil {
-			b.Fatalf("pgxPool.QueryRow Scan failed: %v", err)
+			b.Fatalf("conn.QueryRow Scan failed: %v", err)
 		}
 
 		// Simple check to ensure data was actually read
